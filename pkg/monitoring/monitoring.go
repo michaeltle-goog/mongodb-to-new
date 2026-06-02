@@ -47,10 +47,14 @@ func Init(ctx context.Context, gcpProjectID string) (func(), error) {
 	commonMeter = provider.Meter(meterName)
 
 	shutdown := func() {
+		log.Println("OpenTelemetry monitoring shutting down and flushing metrics...")
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		if err := provider.Shutdown(shutdownCtx); err != nil {
 			otel.Handle(err)
+			log.Printf("Failed to shut down OpenTelemetry monitoring: %v", err)
+		} else {
+			log.Println("OpenTelemetry monitoring successfully shut down and metrics flushed")
 		}
 	}
 
