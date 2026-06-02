@@ -6,10 +6,14 @@ import (
 	"log"
 	"time"
 
-	mexporter "github.com/GoogleCloudPlatform/opentelemetry-operations-go/exporter/metric"
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetricgrpc"
+	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
 	"go.opentelemetry.io/otel/metric"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
+	"go.opentelemetry.io/otel/sdk/resource"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	semconv "go.opentelemetry.io/otel/semconv/v1.24.0"
 )
 
 const meterName = "mongodb-migrator"
@@ -18,43 +22,61 @@ var (
 	commonMeter metric.Meter
 )
 
-// Init initializes the global OpenTelemetry MeterProvider and sets up the common meter.
-// If gcpProjectID is provided, it exports metrics to Google Cloud Monitoring.
-func Init(ctx context.Context, gcpProjectID string) (func(), error) {
-	var provider *sdkmetric.MeterProvider
-
-	if gcpProjectID != "" {
-		// Initialize the GCP Monitoring Exporter
-		exporter, err := mexporter.New(mexporter.WithProjectID(gcpProjectID))
-		if err != nil {
-			return nil, fmt.Errorf("failed to create GCP metric exporter: %w", err)
-		}
-
-		// Create the Meter Provider with the GCP exporter
-		provider = sdkmetric.NewMeterProvider(
-			sdkmetric.WithReader(sdkmetric.NewPeriodicReader(exporter)),
-		)
-		log.Printf("OpenTelemetry monitoring initialized (exporting to GCP project %q)", gcpProjectID)
-	} else {
-		// Create a basic MeterProvider without exporters (acts as a basic/noop metric collector)
-		provider = sdkmetric.NewMeterProvider()
-		log.Println("OpenTelemetry monitoring initialized (local/no-op mode)")
+// Init initializes the global OpenTelemetry MeterProvider and TracerProvider,
+// and sets up the common meter using standard OTLP gRPC exporters.
+func Init(ctx context.Context) (func(), error) {
+	// 1. Define the application's identity
+	res, err := resource.Merge(
+		resource.Default(),
+		resource.NewWithAttributes(
+			semconv.SchemaURL,
+			semconv.ServiceName(meterName),
+		),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create resource: %w", err)
 	}
 
-	otel.SetMeterProvider(provider)
+	// 2. Setup OTLP Trace Exporter (Defaults to localhost:4317)
+	traceExporter, err := otlptracegrpc.New(ctx, otlptracegrpc.WithInsecure())
+	if err != nil {
+		return nil, fmt.Errorf("failed to create OTLP trace exporter: %w", err)
+	}
+	tp := sdktrace.NewTracerProvider(
+		sdktrace.WithBatcher(traceExporter),
+		sdktrace.WithResource(res),
+	)
+	otel.SetTracerProvider(tp)
+
+	// 3. Setup OTLP Metric Exporter (Defaults to localhost:4317)
+	metricExporter, err := otlpmetricgrpc.New(ctx, otlpmetricgrpc.WithInsecure())
+	if err != nil {
+		return nil, fmt.Errorf("failed to create OTLP metric exporter: %w", err)
+	}
+	mp := sdkmetric.NewMeterProvider(
+		sdkmetric.WithReader(sdkmetric.NewPeriodicReader(metricExporter)),
+		sdkmetric.WithResource(res),
+	)
+	otel.SetMeterProvider(mp)
 
 	// Initialize the common meter
-	commonMeter = provider.Meter(meterName)
+	commonMeter = mp.Meter(meterName)
 
 	shutdown := func() {
-		log.Println("OpenTelemetry monitoring shutting down and flushing metrics...")
+		log.Println("OpenTelemetry monitoring shutting down and flushing telemetry...")
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		if err := provider.Shutdown(shutdownCtx); err != nil {
+
+		if err := tp.Shutdown(shutdownCtx); err != nil {
 			otel.Handle(err)
-			log.Printf("Failed to shut down OpenTelemetry monitoring: %v", err)
+			log.Printf("Failed to shut down OpenTelemetry TracerProvider: %v", err)
+		}
+
+		if err := mp.Shutdown(shutdownCtx); err != nil {
+			otel.Handle(err)
+			log.Printf("Failed to shut down OpenTelemetry MeterProvider: %v", err)
 		} else {
-			log.Println("OpenTelemetry monitoring successfully shut down and metrics flushed")
+			log.Println("OpenTelemetry monitoring successfully shut down and telemetry flushed")
 		}
 	}
 

@@ -50,7 +50,7 @@ func main() {
 	defer cancel()
 
 	// Initialize monitoring
-	shutdownMonitoring, err := monitoring.Init(ctx, cfg.GCPProjectID)
+	shutdownMonitoring, err := monitoring.Init(ctx)
 	if err != nil {
 		log.Fatalf("Failed to initialize monitoring: %v", err)
 	}
