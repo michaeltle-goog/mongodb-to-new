@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"time"
 
 	mexporter "github.com/GoogleCloudPlatform/opentelemetry-operations-go/exporter/metric"
 	"go.opentelemetry.io/otel"
@@ -46,7 +47,9 @@ func Init(ctx context.Context, gcpProjectID string) (func(), error) {
 	commonMeter = provider.Meter(meterName)
 
 	shutdown := func() {
-		if err := provider.Shutdown(ctx); err != nil {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := provider.Shutdown(shutdownCtx); err != nil {
 			otel.Handle(err)
 		}
 	}

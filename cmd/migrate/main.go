@@ -88,7 +88,6 @@ func main() {
 	if *mode == "migrate" {
 		duration := time.Since(startTime)
 		log.Infof("Migration completed in %.2f seconds", duration.Seconds())
-		os.Exit(0) // Explicitly exit after migration is complete
 	}
 }
 
