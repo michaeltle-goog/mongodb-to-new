@@ -12,6 +12,7 @@ import (
 	"github.com/gsbingo17/mongodb-migration/pkg/config"
 	"github.com/gsbingo17/mongodb-migration/pkg/logger"
 	"github.com/gsbingo17/mongodb-migration/pkg/migration"
+	"github.com/gsbingo17/mongodb-migration/pkg/monitoring"
 )
 
 func main() {
@@ -47,6 +48,13 @@ func main() {
 	// Create context with cancellation
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+
+	// Initialize monitoring
+	shutdownMonitoring, err := monitoring.Init(ctx)
+	if err != nil {
+		log.Fatalf("Failed to initialize monitoring: %v", err)
+	}
+	defer shutdownMonitoring()
 
 	// Handle interrupt signals
 	signalChan := make(chan os.Signal, 1)
