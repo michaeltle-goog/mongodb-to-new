@@ -2,7 +2,10 @@ package monitoring
 
 import (
 	"context"
+	"fmt"
+	"log"
 
+	mexporter "github.com/GoogleCloudPlatform/opentelemetry-operations-go/exporter/metric"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/metric"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
@@ -15,11 +18,27 @@ var (
 )
 
 // Init initializes the global OpenTelemetry MeterProvider and sets up the common meter.
-func Init(ctx context.Context) (func(), error) {
-	// Create a basic MeterProvider. In this initial implementation, we setup a basic
-	// MeterProvider without additional exporters (it acts as a basic/noop metric collector
-	// until readers/exporters are configured).
-	provider := sdkmetric.NewMeterProvider()
+// If gcpProjectID is provided, it exports metrics to Google Cloud Monitoring.
+func Init(ctx context.Context, gcpProjectID string) (func(), error) {
+	var provider *sdkmetric.MeterProvider
+
+	if gcpProjectID != "" {
+		// Initialize the GCP Monitoring Exporter
+		exporter, err := mexporter.New(mexporter.WithProjectID(gcpProjectID))
+		if err != nil {
+			return nil, fmt.Errorf("failed to create GCP metric exporter: %w", err)
+		}
+
+		// Create the Meter Provider with the GCP exporter
+		provider = sdkmetric.NewMeterProvider(
+			sdkmetric.WithReader(sdkmetric.NewPeriodicReader(exporter)),
+		)
+		log.Printf("OpenTelemetry monitoring initialized (exporting to GCP project %q)", gcpProjectID)
+	} else {
+		// Create a basic MeterProvider without exporters (acts as a basic/noop metric collector)
+		provider = sdkmetric.NewMeterProvider()
+		log.Println("OpenTelemetry monitoring initialized (local/no-op mode)")
+	}
 
 	otel.SetMeterProvider(provider)
 
